@@ -1,3 +1,36 @@
+
+# GS3LAM-Instance (Modified Version)
+
+> ⚠️ **Note**:  
+> This repository is a **modified version of the original [GS3LAM (ACM MM 2024)](https://github.com/lif314/GS3LAM)**.  
+> The original README is preserved below for reference.  
+> Here we summarize the main modifications and ongoing work.
+
+## 🔹 Modifications from the Original
+- **Instance-level Ground Truth (GT)**
+  - Added `replica_gt.py` to generate instance GT based on semantic labels + connected components.
+  - Supports custom GT pipelines (YOLO, SAM, Detectron2 → replaced with Replica-based GT).
+
+- **Instance Handling**
+  - Modified `visualizer/offline_recon.py` and `visualizer/online_recon.py` to integrate instance results.
+  - Added debugging utilities to verify whether instance IDs propagate correctly in the pipeline.
+
+- **New Scripts**
+  - `generate_gt_instance.py`, `resize_gt_labels.py`, `inst_well_check.py` for GT creation and validation.
+  - Experimental utilities for visualization (`semantic_vis/`, `gsplat_color.py`).
+
+- **Research Focus**
+  - Investigating whether instance information flows correctly through the pipeline.
+  - Comparing with SOTA approaches (e.g., Khronos) and considering alternative directions  
+    (scene graph integration, AR-focused lightweight design).
+
+---
+
+# Original README (Unmodified)
+
+
+
+
 <p align="center">
   <h1 align="center">
     GS<sup>3</sup>LAM: Gaussian Semantic Splatting SLAM
