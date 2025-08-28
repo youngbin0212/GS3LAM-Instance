@@ -11,7 +11,7 @@
 ### 1. 데이터/흐름 확장
 - **관련 파일:** `GS3LAM.py`, `Mapper.py`  
 - dataset 샘플 분기 처리 시 `inst_mask` 포함  
-- keyframe 구조에 `'inst': inst_mask` 추가 → 프레임별 인스턴스 마스크 저장  
+- keyframe 구조에 `'inst': inst_mask` 추가 -> 프레임별 인스턴스 마스크 저장  
 - inst_mask는 dataset/keyframe에서 사용, inst_embed는 모델 출력 활용  
 
 ### 2. 모델 구조
