@@ -4,7 +4,7 @@
 > ⚠**Note**:  
 > This repository is a **modified version of the original [GS3LAM (ACM MM 2024)](https://github.com/lif314/GS3LAM)**.  
 > The original README is preserved below for reference.  
-> Here we summarize the main modifications and ongoing work.
+> Here I summarize the main modifications and ongoing work.
 
 ## Modifications from the Original
 
