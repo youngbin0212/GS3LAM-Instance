@@ -35,7 +35,8 @@ def online_recon(cfg):
     video_path = os.path.join(cfg["logdir"], cfg["render_mode"] + str(".mp4"))
     
     # load semantic decoder
-    semantic_decoder = SemanticDecoder(16, 256)
+    #semantic_decoder = SemanticDecoder(16, 256)
+    semantic_decoder = SemanticDecoder(16, 256, 64)
     semantic_decoder.load_state_dict(torch.load(classifier_path))
             
     # Load Scene Data
