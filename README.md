@@ -1,28 +1,35 @@
 
 # GS3LAM-Instance (Modified Version)
 
-> ⚠️ **Note**:  
+> ⚠**Note**:  
 > This repository is a **modified version of the original [GS3LAM (ACM MM 2024)](https://github.com/lif314/GS3LAM)**.  
 > The original README is preserved below for reference.  
 > Here we summarize the main modifications and ongoing work.
 
-## 🔹 Modifications from the Original
-- **Instance-level Ground Truth (GT)**
-  - Added `replica_gt.py` to generate instance GT based on semantic labels + connected components.
-  - Supports custom GT pipelines (YOLO, SAM, Detectron2 → replaced with Replica-based GT).
+## Modifications from the Original
+- 1. 데이터/흐름 확장
+  - GS3LAM.py, Mapper.py
+  - dataset 및 keyframe 구조를 inst_mask, inst_embed까지 수용하도록 확장
 
-- **Instance Handling**
-  - Modified `visualizer/offline_recon.py` and `visualizer/online_recon.py` to integrate instance results.
-  - Added debugging utilities to verify whether instance IDs propagate correctly in the pipeline.
+- 2. 모델 구조
+  - Decoder.py
+  - Semantic + Instance 2-Head 출력 (logits + embedding)
+  - 임베딩 L2 정규화 적용
 
-- **New Scripts**
-  - `generate_gt_instance.py`, `resize_gt_labels.py`, `inst_well_check.py` for GT creation and validation.
-  - Experimental utilities for visualization (`semantic_vis/`, `gsplat_color.py`).
+- 3. 손실 함수
+  - Loss.py, contrastive_loss.py
+  - intra-instance compactness 손실 추가
+  - Contrastive loss 지원
 
-- **Research Focus**
-  - Investigating whether instance information flows correctly through the pipeline.
-  - Comparing with SOTA approaches (e.g., Khronos) and considering alternative directions  
-    (scene graph integration, AR-focused lightweight design).
+- 4. 후처리 / 평가
+  - instance_post.py, Evaluater.py
+  - 예측 임베딩 기반 -> Instance 마스크 생성 및 저장
+  - .npy 저장 및 자동 지표 평가 지원
+
+- 5. 학습 제어 / 최적화
+  - Tracker.py, GaussianManager.py, Render.py
+  - Tracking/Mappng 단계별 학습률 분리
+  - 렌더 출력/가우시안 관리와 연동
 
 ---
 
