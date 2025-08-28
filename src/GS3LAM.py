@@ -22,6 +22,11 @@ from src.Decoder import SemanticDecoder
 from src.utils.logger import report_progress, save_params_ckpt, save_params
 from src.utils.gaussian_utils import matrix_to_quaternion, build_rotation
 from src.utils.common_utils import seed_everything
+from src.Render import transformed_params2rendervar
+from gaussian_semantic_rasterization import GaussianRasterizer
+from src.utils.gaussian_utils import transform_to_frame
+from src.utils.instance_post import segment_instances_from_embeddings
+
 
 def run_gs3lam(config: dict):
     seed_everything(seed=config['seed'])
@@ -35,6 +40,8 @@ def run_gs3lam(config: dict):
     output_dir = os.path.join(config["workdir"], config["run_name"])
     eval_dir = os.path.join(output_dir, "eval")
     os.makedirs(eval_dir, exist_ok=True)
+    save_dir = os.path.join(eval_dir, "pred_mask_array")
+    os.makedirs(save_dir, exist_ok=True)
 
     device = torch.device(config["primary_device"])
 
@@ -63,6 +70,26 @@ def run_gs3lam(config: dict):
         relative_pose=True,
         use_train_split=dataset_config["use_train_split"],
     )
+    # ▼▼ 추가: dataset 샘플 구조 한 번만 확인 ▼▼
+    try:
+        s = dataset[0]
+        print("[debug] dataset[0] length =", len(s))
+        if len(s) >= 6:
+            inst0 = s[5]  # (color, depth, intrinsics, gt_pose, gt_objects, inst_mask, ...)
+            print("[debug] dataset[0] inst_mask type:", type(inst0))
+            try:
+                import numpy as np
+                arr = inst0.cpu().numpy() if hasattr(inst0, "cpu") else inst0
+                print("[debug] dataset[0] inst_mask shape/dtype:", getattr(arr, "shape", None), getattr(arr, "dtype", None))
+                uniq = np.unique(arr) if hasattr(arr, "shape") else []
+                print("[debug] dataset[0] unique instance ids (head):", uniq[:10], "count:", len(uniq))
+            except Exception as e:
+                print("[debug] np/cpu convert failed:", e)
+        else:
+            print("[debug] instance not included in dataset[0] (len < 6)")
+    except Exception as e:
+        print("[debug] dataset[0] probe failed:", e)
+    # ▲▲ 확인 끝나면 나중에 지워도 됨 ▲▲
 
     num_frames = dataset_config["num_frames"]
     if num_frames == -1:
@@ -108,8 +135,35 @@ def run_gs3lam(config: dict):
         #####################################################
 
         # Load RGBD frames incrementally instead of all frames
-        color, depth, _, gt_pose, gt_objects = dataset[time_idx]
+        #color, depth, _, gt_pose, gt_objects = dataset[time_idx]
+        sample = dataset[time_idx]
+        if len(sample) == 7:
+            color, depth, _, gt_pose, gt_objects, inst_mask, _ = sample  # intrinsics는 '_'로 무시
+        elif len(sample) == 6:
+            color, depth, _, gt_pose, gt_objects, inst_mask = sample
+        elif len(sample) == 5:
+            color, depth, _, gt_pose, gt_objects = sample
+            inst_mask = None
+        else:
+            color, depth, _, gt_pose = sample
+            gt_objects, inst_mask = None, None
         
+        # ▼▼ 여기부터 디버그 블록 추가 (첫 프레임만) ▼▼
+        """
+        if time_idx == 0:  # 첫 프레임만 가볍게 확인
+            print("[debug] inst_mask is None?", inst_mask is None)
+            if inst_mask is not None:
+                try:
+                    import numpy as np
+                    arr = inst_mask.cpu().numpy() if hasattr(inst_mask, "cpu") else inst_mask
+                    print("[debug] inst_mask shape/dtype:",
+                          getattr(arr, "shape", None), getattr(arr, "dtype", None))
+                    uniq = np.unique(arr) if hasattr(arr, "shape") else []
+                    print("[debug] unique instance ids (head):", uniq[:10], "count:", len(uniq))
+                except Exception as e:
+                    print("[debug] inst stats failed:", e)
+        # ▲▲ 디버그 블록 끝 ▲▲
+        """
 
         # Process poses
         gt_w2c = torch.linalg.inv(gt_pose)
@@ -123,6 +177,7 @@ def run_gs3lam(config: dict):
         curr_data = {'cam': cam, 'im': color, 'depth': depth, 'obj': gt_objects, 
                      'id': iter_time_idx, 'intrinsics': intrinsics, 
                      'w2c': first_frame_w2c, 'iter_gt_w2c_list': curr_gt_w2c}
+        # inst_mask는 get_loss(...)의 인자로 직접 넘깁니다.
 
 
         #####################################################
@@ -167,7 +222,20 @@ def run_gs3lam(config: dict):
                                                     use_alpha_for_loss=config['tracking']['use_alpha_for_loss'],
                                                     alpha_thres=config['tracking']['alpha_thres'],
                                                     semantic_decoder=semantic_decoder,
-                                                    num_classes=config['semantic']['num_classes'])
+                                                    num_classes=config['semantic']['num_classes'],
+                                                    instance_mask=inst_mask)   # 추가
+
+                # ▼▼ 디버그: 첫 타임스텝에서 앞의 몇 번 반복은 무조건 출력 ▼▼
+                """
+                if time_idx == 0 and iter < 3:  # 0,1,2번 반복에서 모두 확인
+                    try:
+                        print(f"[debug] t={time_idx}, iter={iter}, mapping weighted_losses keys:", list(losses.keys()))
+                        print("[debug] has 'inst'?", 'inst' in losses)
+                        if 'inst' in losses:
+                            print("[debug] weighted inst loss:", float(losses['inst']))
+                    except Exception as e:
+                        print("[debug] mapping print failed:", e)
+                # ▲▲ 여기까지 ▲▲"""
 
                 # Backprop
                 loss.backward()
@@ -312,6 +380,8 @@ def run_gs3lam(config: dict):
                     iter_time_idx = time_idx
                     iter_color = color
                     iter_depth = depth
+                    iter_object = gt_objects if config['mapping']["use_semantic_for_mapping"] else None
+                    iter_inst  = inst_mask  # ★ 현재 프레임의 인스턴스 마스크
                     if config['mapping']["use_semantic_for_mapping"]:
                         iter_object = gt_objects
                 else:
@@ -320,6 +390,8 @@ def run_gs3lam(config: dict):
                     iter_time_idx = keyframe_list[keyframe_idx]['id']
                     iter_color = keyframe_list[keyframe_idx]['color']
                     iter_depth = keyframe_list[keyframe_idx]['depth']
+                    iter_object  = keyframe_list[keyframe_idx]['obj'] if config['mapping']["use_semantic_for_mapping"] else None
+                    iter_inst  = keyframe_list[keyframe_idx].get('inst', None)  # ★ 키프레임에 저장해둔 inst
                     if config['mapping']["use_semantic_for_mapping"]:
                         iter_object = keyframe_list[keyframe_idx]['obj']
 
@@ -339,6 +411,9 @@ def run_gs3lam(config: dict):
                     iter_data = {'cam': cam, 'im': iter_color, 'depth': iter_depth, 'id': iter_time_idx, 
                              'intrinsics': intrinsics, 'w2c': first_frame_w2c, 'iter_gt_w2c_list': iter_gt_w2c}
                 
+                """if iter_inst is not None:
+                    print("[dbg] GT inst unique:", torch.unique(iter_inst).numel(),
+                        "values:", torch.unique(iter_inst).tolist())"""
                 # Loss for current frame
                 loss, variables, losses = get_loss(params=params,
                                                    curr_data=iter_data,
@@ -351,8 +426,16 @@ def run_gs3lam(config: dict):
                                                    use_reg_loss=config['mapping']['use_reg_loss'],
                                                    use_semantic_for_mapping=config['mapping']['use_semantic_for_mapping'],
                                                    semantic_decoder=semantic_decoder,
-                                                   num_classes=config['semantic']["num_classes"])
-                     
+                                                   num_classes=config['semantic']["num_classes"],
+                                                   instance_mask=iter_inst)   # 추가
+                # === 디버깅 코드 추가 ===
+                if time_idx == 0 and iter < 3:  # 첫 프레임, 앞의 몇 iter만 찍기
+                    print(f"[debug] mapping losses keys: {list(losses.keys())}")
+                    if "inst" in losses:
+                        print("[debug] inst raw loss:", float(losses["inst"]))
+                    else:
+                        print("[debug] no inst in losses")
+                # ======================
                
                 loss.backward()
                 
@@ -406,7 +489,36 @@ def run_gs3lam(config: dict):
                     ckpt_output_dir = os.path.join(config["workdir"], config["run_name"])
                     save_params_ckpt(params, ckpt_output_dir, time_idx)
                     print('Failed to evaluate trajectory.')
-        
+
+            """
+            # ---- (새로 추가) 현재 프레임의 예측 인스턴스 ID 맵 저장 ----
+            try:
+                with torch.no_grad():
+                    # 현재 프레임 관점으로 가우시안 변환
+                    transformed_gaussians = transform_to_frame(
+                        params, time_idx, gaussians_grad=False, camera_grad=False
+                    )
+
+                    # 렌더 변수 구성 + 렌더 (rgb/objects/alpha/깊이)
+                    rendervar = transformed_params2rendervar(params, transformed_gaussians)
+                    rendered_image, rendered_objects, _, rendered_depth, rendered_alpha = \
+                        GaussianRasterizer(raster_settings=cam)(**rendervar)
+
+                    # 세만틱 디코더 통과 → (sem_logits, inst_embed)
+                    sem_logits, inst_embed = semantic_decoder(rendered_objects)
+
+                    # 임베딩 기반 인스턴스 후처리
+                    pred_id = segment_instances_from_embeddings(
+                        sem_logits, inst_embed, alpha=rendered_alpha[0], sim_thr=0.6, min_area=30
+                    ).cpu().numpy().astype(np.int32)
+
+                    # 저장 (*.npy)
+                    np.save(os.path.join(save_dir, f"frame{time_idx:06d}.npy"), pred_id)
+            except Exception as e:
+                print(f"[warn] save pred instance map failed at frame {time_idx}: {e}")"""
+
+
+
         # Add frame to keyframe list
         if ((time_idx == 0) or ((time_idx+1) % config['keyframe_every'] == 0) or \
                     (time_idx == num_frames-2)) and (not torch.isinf(curr_gt_w2c[-1]).any()) and (not torch.isnan(curr_gt_w2c[-1]).any()):
@@ -419,7 +531,8 @@ def run_gs3lam(config: dict):
                 curr_w2c[:3, 3] = curr_cam_tran
                 # Initialize Keyframe Info
                 curr_keyframe = {'id': time_idx, 'est_w2c': curr_w2c,
-                                 'color': color, 'depth': depth, "obj": gt_objects}
+                                 'color': color, 'depth': depth, "obj": gt_objects,
+                                 'inst': inst_mask}  # ★ 추가
                 
                 # Add to keyframe list
                 keyframe_list.append(curr_keyframe)

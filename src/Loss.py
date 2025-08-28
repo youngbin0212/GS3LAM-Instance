@@ -1,8 +1,11 @@
 import torch
+import torch.nn.functional as F
 
 from src.utils.gaussian_utils import transform_to_frame
 from src.Render import transformed_params2rendervar
-from src.utils.metric_utils import calc_ssim, l1_loss_v1
+from src.utils.metric_utils import calc_ssim, l1_loss_v1            
+from src.utils.contrastive_loss import SimpleContrastiveLoss
+
 from gaussian_semantic_rasterization import GaussianRasterizer
 
 def initialize_optimizer(params, lrs_dict, tracking):
@@ -21,7 +24,8 @@ def get_loss(params, curr_data, variables, iter_time_idx, loss_weights,
              use_semantic_for_mapping=True,
              use_alpha_for_loss=False,
              alpha_thres=0.99,
-             num_classes=256):
+             num_classes=256,
+             instance_mask=None):   # 추가
     # Initialize Loss Dictionary
     losses = {}
 
@@ -88,20 +92,110 @@ def get_loss(params, curr_data, variables, iter_time_idx, loss_weights,
         losses['im'] = 0.8 * l1_loss_v1(rendered_image, curr_data['im']) + 0.2 * (1.0 - calc_ssim(rendered_image, curr_data['im']))
     
     gt_obj = curr_data["obj"].long()
-    logits = semantic_decoder(rendered_objects)
-    cls_criterion = torch.nn.CrossEntropyLoss(reduction='none')
-    if tracking and use_semantic_for_tracking:
-        if ignore_outlier_depth_loss:
-            obj_mask = mask.detach().squeeze(0)
-            loss_obj =  cls_criterion(logits.unsqueeze(0), gt_obj.unsqueeze(0)).squeeze()[obj_mask].sum()
-        else:
-            loss_obj =  cls_criterion(logits.unsqueeze(0), gt_obj.unsqueeze(0)).squeeze().sum()
+    #logits = semantic_decoder(rendered_objects)
+    #cls_criterion = torch.nn.CrossEntropyLoss(reduction='none')
+    sem_logits, inst_embed = semantic_decoder(rendered_objects)  # ← (C,H,W) 입력 가능
+    cls_criterion = torch.nn.CrossEntropyLoss(ignore_index=255, reduction='none')
 
-        losses['obj'] = loss_obj / torch.log(torch.tensor(num_classes))  # normalize to (0,1)
+    # ------------------------------------------------------------------
+    # Instance compactness loss (옵션)
+    # - instance_mask: (H, W), 0은 배경/무시, 동일 ID는 같은 인스턴스
+    # - rendered_objects: (C, H, W) 를 픽셀 임베딩으로 사용
+    # ------------------------------------------------------------------
+
+    # Instance compactness loss (옵션) — mapping 단계에서만 실행
+    #if (instance_mask is not None) and ('inst' in loss_weights) and (loss_weights['inst'] > 0):
+    if mapping and (instance_mask is not None) and ('inst' in loss_weights) and (loss_weights['inst'] > 0):
+        D, H, W = inst_embed.shape
+
+        # 마스크 해상도 정렬
+        if instance_mask.ndim == 2:
+            m = instance_mask[None, None].float()
+        else:
+            m = instance_mask.float().view(1, 1, *instance_mask.shape[-2:])
+        if m.shape[-2:] != (H, W):
+            m = F.interpolate(m, size=(H, W), mode='nearest')
+        mid = m[0, 0].long().to(inst_embed.device)  # (H,W)
+
+        # (선택) opacity로 신뢰도가 낮은 픽셀 무시
+        if use_alpha_for_loss:
+            pres = (rendered_alpha > alpha_thres)[0]       # (H,W) bool
+            mid = torch.where(pres, mid, torch.zeros_like(mid))
+
+        # 픽셀 임베딩 (HW, D)
+        emb = inst_embed.permute(1, 2, 0).reshape(-1, D)   # (HW, D)
+        ids = mid.reshape(-1)                              # (HW,)
+
+        # -------- compactness (intra-instance) --------
+        compact = emb.new_tensor(0.0); nvalid = 0
+        for iid in torch.unique(ids):
+            if iid <= 0:
+                continue
+            sel = (ids == iid)
+            if sel.sum() < 5:
+                continue
+            v = emb[sel]                 # (N_i, D)
+            c = v.mean(0, keepdim=True)  # (1, D)
+            compact = compact + ((v - c) ** 2).mean()
+            nvalid += 1
+
+        if nvalid > 0:
+            losses['inst'] = compact / nvalid
+            # print(f"[loss.py debug] inst={float(losses['inst'])}")
+
+        # ---- Contrastive instance 분리 손실 (선택, config에 inst_ctr > 0 일 때) ----
+        if ('inst_ctr' in loss_weights) and (loss_weights['inst_ctr'] > 0):
+
+            # 이미 계산된 ids:(HW,), emb:(HW,D) 재사용
+            valid = ids > 0
+            if valid.sum() > 50:  # 최소 샘플 수
+                emb_valid = emb[valid]
+                labels_valid = ids[valid]
+
+                # 과다 시 샘플링 (메모리 방지)
+                if emb_valid.shape[0] > 5000:
+                    idx = torch.randperm(emb_valid.shape[0], device=emb_valid.device)[:5000]
+                    emb_valid = emb_valid[idx]
+                    labels_valid = labels_valid[idx]
+
+                contrast_fn = SimpleContrastiveLoss(temperature=0.1)
+                loss_ctr = contrast_fn(emb_valid, labels_valid)
+                losses['inst_ctr'] = loss_ctr
+        """ CHECKED: It worked!
+        # ---- 디버그 출력 (50 프레임마다) ----
+        if (iter_time_idx % 50 == 0):
+            print("[loss debug] iter:", iter_time_idx,
+                "inst:", float(losses.get('inst', 0.0)),
+                "inst_ctr:", float(losses.get('inst_ctr', 0.0)))"""
+
+    if tracking and use_semantic_for_tracking:
+        ce_map = cls_criterion(sem_logits.unsqueeze(0), gt_obj.unsqueeze(0))[0]  # (H,W)
+
+        if use_alpha_for_loss:
+            # opacity(=rendered_alpha)로 신뢰도 가중
+            w = rendered_alpha[0].clamp(0, 1)        # (H,W) 혹은 (1,H,W)->(H,W)
+            loss_obj = (ce_map * w).sum() / (w > 0).sum().clamp_min(1)
+        elif ignore_outlier_depth_loss:
+            obj_mask = mask.detach().squeeze(0)      # (H,W)
+            loss_obj = ce_map[obj_mask].sum()
+        else:
+            loss_obj = ce_map.sum()
+
+        norm_denom = torch.log(torch.tensor(float(num_classes), device=sem_logits.device))
+        losses['obj'] = loss_obj / norm_denom
+    
 
     if mapping and use_semantic_for_mapping:
-        loss_obj =  cls_criterion(logits.unsqueeze(0), gt_obj.unsqueeze(0)).squeeze().mean()
-        losses['obj'] = loss_obj / torch.log(torch.tensor(num_classes))
+        ce_map = cls_criterion(sem_logits.unsqueeze(0), gt_obj.unsqueeze(0))[0]  # (H,W)
+        if use_alpha_for_loss:
+            w = rendered_alpha[0].clamp(0, 1)
+            loss_obj = (ce_map * w).sum() / (w > 0).sum().clamp_min(1)
+        else:
+            loss_obj = ce_map.mean()
+
+        norm_denom = torch.log(torch.tensor(float(num_classes), device=sem_logits.device))
+        losses['obj'] = loss_obj / norm_denom
+
 
     # regularize Gaussians, scale, meters
     if mapping and use_reg_loss:

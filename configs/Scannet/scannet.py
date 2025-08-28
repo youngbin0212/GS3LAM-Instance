@@ -9,7 +9,9 @@ scenes = ["scene0059_00", "scene0106_00", "scene0169_00",
 seed = int(os.environ["SEED"])
 scene_name = scenes[int(os.environ["SCENE_NUM"])]
 
-basedir = "./data/scannet"
+#basedir = "./data/ScanNet/scannet_frames_25k" #"./data/scannet"
+basedir = "/media/uvrlab/HDD_5TB/scannet_data/scans"
+
 
 # General Settings
 first_frame_mapping_iters = 1000
@@ -17,7 +19,7 @@ tracking_iters = 200
 mapping_iters = 60
 opt_rskm_interval = 5
 densify_thres=0.5 # For Addition of new Gaussians
-end_frame = -1
+end_frame = 500 #-1
 
 
 map_every = 1 # add Gaussians
@@ -83,6 +85,7 @@ config = dict(
             im=0.5,
             depth=1.0,
             obj=0.001,
+            inst=0.1,  # edit: instance embedding contrastive loss
             big_gaussian_reg=0.05,
             small_gaussian_reg=0.005,
             rel_rgb=0.10,

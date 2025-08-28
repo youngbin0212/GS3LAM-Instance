@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 primary_device="cuda:0"
@@ -5,8 +6,8 @@ primary_device="cuda:0"
 scenes = ["scene0059_00", "scene0106_00", "scene0169_00", 
           "scene0181_00", "scene0207_00", "scene0000_00"]
 
-seed = 1
-scene_name = scenes[0]
+seed = int(os.environ["SEED"])
+scene_name = scenes[int(os.environ["SCENE_NUM"])]
 
 basedir = "./data/ScanNet/scannet_frames_25k" #"./data/scannet"
 
@@ -15,8 +16,9 @@ first_frame_mapping_iters = 1000
 tracking_iters = 200
 mapping_iters = 60
 opt_rskm_interval = 5
-densify_thres = 0.5 # For Addition of new Gaussians
+densify_thres=0.5 # For Addition of new Gaussians
 end_frame = -1
+
 
 map_every = 1 # add Gaussians
 keyframe_every = 5
@@ -53,7 +55,7 @@ config = dict(
         desired_image_width=640,
         start=0,
         end=end_frame,
-        stride= 100,   #1, edit
+        stride=1,
         num_frames=-1,
     ),
     use_semantic=True,
@@ -69,6 +71,7 @@ config = dict(
         forward_prop=True, # Forward Propagate Poses
         num_iters=tracking_iters,
         use_alpha_for_loss=True,
+        # relative pose constraint
         use_rel_pose_loss=False,
         alpha_thres=0.99,
         use_l1=True,
@@ -82,6 +85,9 @@ config = dict(
             obj=0.001,
             big_gaussian_reg=0.05,
             small_gaussian_reg=0.005,
+            rel_rgb=0.10,
+            rel_depth=0.10,
+            obj_3d=1000.0
         ),
         lrs=dict(
             means3D=0.0,
@@ -163,3 +169,18 @@ config = dict(
         enter_interactive_post_online=True, # Enter Interactive Mode after Online Recon Viz
     ),
 )
+def load_poses(self):
+    pose_dir = os.path.join(self.input_folder, "pose")
+    pose_list = []
+
+    for idx in range(len(self.color_paths)):
+        fname = f"{idx * 100:06d}.txt"  # ScanNet은 000000 형식 + stride=100
+        pose_path = os.path.join(pose_dir, fname)
+        if os.path.exists(pose_path):
+            pose = np.loadtxt(pose_path)
+            pose_list.append(torch.from_numpy(pose).float())
+        else:
+            print(f"[WARNING] Pose file not found: {pose_path}, using identity")
+            pose_list.append(torch.eye(4))
+
+    return pose_list

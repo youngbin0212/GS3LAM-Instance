@@ -122,7 +122,21 @@ def initialize_params(init_pt_cld, num_frames, mean3_sq_dist, gaussian_distribut
 
 def initialize_first_timestep(dataset, num_frames, scene_radius_depth_ratio, mean_sq_dist_method, densify_dataset=None, gaussian_distribution=None, num_objects=16):
     # Get RGB-D Data & Camera Parameters
-    color, depth, intrinsics, pose, gt_objects = dataset[0]
+    #color, depth, intrinsics, pose, gt_objects = dataset[0]
+    # 샘플 언팩을 유연하게
+    sample = dataset[0]
+    if len(sample) == 7:
+        color, depth, intrinsics, pose, gt_objects, inst_mask, embedding = sample
+    elif len(sample) == 6:
+        color, depth, intrinsics, pose, gt_objects, inst_mask = sample
+    elif len(sample) == 5:
+        color, depth, intrinsics, pose, gt_objects = sample
+        inst_mask = None
+    elif len(sample) == 4:
+        color, depth, intrinsics, pose = sample
+        gt_objects, inst_mask = None, None
+    else:
+        raise ValueError(f"Unexpected dataset sample length: {len(sample)}")
 
 
     # Process RGB-D Data

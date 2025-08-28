@@ -4,14 +4,14 @@ primary_device="cuda:0"
 seed = 1
 scene_name = "office0"
 
-basedir = "./data/Replica"
+basedir = "/home/uvrlab/GS3LAM-Replica/Replica"
 
 first_frame_mapping_iters = 1000
 tracking_iters = 40
 mapping_iters = 60
 opt_rskm_interval = 5
 densify_thres=0.1 # For adding new Gaussians
-end_frame = -1
+end_frame = 500 #-1
 
 use_semantic_for_mapping=True
 map_every = 1
@@ -89,6 +89,7 @@ config = dict(
             im=0.5,
             depth=1.0,
             obj=0.001,
+            inst=0.0,   # tracking에선 비활성화
             big_gaussian_reg=0.05,
             small_gaussian_reg=0.005,
             rel_rgb=0.10,
@@ -126,6 +127,8 @@ config = dict(
             im=0.5,
             depth=1.0,
             obj=0.01,
+            inst=0.1,  # edit (혹은 사용하지 않는다면 0.0)
+            inst_ctr= 0.05,  # 새로 추가 #Contrastive
             big_gaussian_reg=0.01,
             small_gaussian_reg=0.001,
         ),
@@ -172,6 +175,6 @@ config = dict(
         viz_near=0.01, viz_far=100.0,
         view_scale=2,
         viz_fps=5, # FPS for Online Recon Viz
-        enter_interactive_post_online=True, # Enter Interactive Mode after Online Recon Viz
+        enter_interactive_post_online=False, # Enter Interactive Mode after Online Recon Viz #False
     ),
 )

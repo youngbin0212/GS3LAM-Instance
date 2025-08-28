@@ -6,17 +6,19 @@ scenes = ["scene0059_00", "scene0106_00", "scene0169_00",
           "scene0181_00", "scene0207_00", "scene0000_00"]
 
 seed = 1
-scene_name = scenes[0]
+scene_name = scenes[5]
 
-basedir = "./data/ScanNet/scannet_frames_25k" #"./data/scannet"
+#basedir = "./data/ScanNet/scannet_frames_25k" #"./data/scannet"
+basedir = "/media/uvrlab/HDD_5TB/scannet_data/scans"
+
 
 # General Settings
 first_frame_mapping_iters = 1000
-tracking_iters = 200
+tracking_iters = 200 #Edit (original = 200)
 mapping_iters = 60
 opt_rskm_interval = 5
 densify_thres = 0.5 # For Addition of new Gaussians
-end_frame = -1
+end_frame = 500
 
 map_every = 1 # add Gaussians
 keyframe_every = 5
@@ -53,7 +55,7 @@ config = dict(
         desired_image_width=640,
         start=0,
         end=end_frame,
-        stride= 100,   #1, edit
+        stride= 1,   #1, edit
         num_frames=-1,
     ),
     use_semantic=True,
@@ -64,7 +66,7 @@ config = dict(
         num_classes=256, # out_channels
     ),
     tracking=dict(
-        use_gt_poses=False, # Use GT Poses for Tracking
+        use_gt_poses= False, # Use GT Poses for Tracking
         use_semantic_for_tracking=True,
         forward_prop=True, # Forward Propagate Poses
         num_iters=tracking_iters,
@@ -80,6 +82,7 @@ config = dict(
             im=0.5,
             depth=1.0,
             obj=0.001,
+            inst=0.0,   # tracking에선 비활성화
             big_gaussian_reg=0.05,
             small_gaussian_reg=0.005,
         ),
@@ -114,6 +117,7 @@ config = dict(
             im=0.5,
             depth=1.0,
             obj=0.01,
+            inst=0.1,  # edit (혹은 사용하지 않는다면 0.0)
             big_gaussian_reg=0.01,
             small_gaussian_reg=0.001,
         ),
