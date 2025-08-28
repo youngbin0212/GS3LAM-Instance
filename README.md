@@ -7,29 +7,35 @@
 > Here we summarize the main modifications and ongoing work.
 
 ## Modifications from the Original
-- 1. 데이터/흐름 확장
-  - GS3LAM.py, Mapper.py
-  - dataset 및 keyframe 구조를 inst_mask, inst_embed까지 수용하도록 확장
 
-- 2. 모델 구조
-  - Decoder.py
-  - Semantic + Instance 2-Head 출력 (logits + embedding)
-  - 임베딩 L2 정규화 적용
+### 1. 데이터/흐름 확장
+- **관련 파일:** `GS3LAM.py`, `Mapper.py`  
+- dataset 샘플 분기 처리 시 `inst_mask` 포함  
+- keyframe 구조에 `'inst': inst_mask` 추가 → 프레임별 인스턴스 마스크 저장  
+- inst_mask는 dataset/keyframe에서 사용, inst_embed는 모델 출력 활용  
 
-- 3. 손실 함수
-  - Loss.py, contrastive_loss.py
-  - intra-instance compactness 손실 추가
-  - Contrastive loss 지원
+### 2. 모델 구조
+- **관련 파일:** `Decoder.py`  
+- `SemanticDecoder`를 2-head 구조(`sem_head`, `inst_head`)로 구현  
+- 출력: `(sem_logits, inst_embed)`  
+- `inst_embed`는 `F.normalize`로 L2 정규화 적용  
 
-- 4. 후처리 / 평가
-  - instance_post.py, Evaluater.py
-  - 예측 임베딩 기반 -> Instance 마스크 생성 및 저장
-  - .npy 저장 및 자동 지표 평가 지원
+### 3. 손실 함수
+- **관련 파일:** `Loss.py`, `contrastive_loss.py`  
+- **Instance compactness loss**: 같은 인스턴스 내 임베딩을 가깝게 유지 (`losses['inst']`)  
+- **Contrastive loss (옵션)**: 서로 다른 인스턴스를 분리 (`losses['inst_ctr']`)  
+- `inst loss`는 **mapping 단계에서만 계산**  
 
-- 5. 학습 제어 / 최적화
-  - Tracker.py, GaussianManager.py, Render.py
-  - Tracking/Mappng 단계별 학습률 분리
-  - 렌더 출력/가우시안 관리와 연동
+### 4. 후처리 / 평가
+- **관련 파일:** `instance_post.py`, `Evaluater.py`  
+- `segment_instances_from_embeddings`: 임베딩 기반 Union-Find로 인스턴스 마스크 생성  
+- 예측 인스턴스 마스크를 `.npy`로 저장 (GS3LAM.py 코드 블록, 평가 시 `eval()` 호출 포함)  
+
+### 5. 학습 제어 / 최적화
+- **관련 파일:** `Tracker.py`, `GaussianManager.py`, `Render.py`  
+- Tracking 단계: semantic decoder `lr=0.0` (고정)  
+- Mapping 단계: semantic decoder `lr=5e-4`로 학습  
+- Gaussian 관리(`prune_gaussians`, `densify`)를 mapping 루프와 연동  
 
 ---
 
