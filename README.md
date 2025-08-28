@@ -23,7 +23,8 @@
 ### 3. 손실 함수
 - **관련 파일:** `Loss.py`, `contrastive_loss.py`  
 - **Instance compactness loss**: 같은 인스턴스 내 임베딩을 가깝게 유지 (`losses['inst']`)  
-- **Contrastive loss**: 서로 다른 인스턴스를 분리 (`losses['inst_ctr']`)  
+- **Contrastive loss**: 서로 다른 인스턴스를 분리 (`losses['inst_ctr']`)
+  - (config에서 `inst_ctr` 값이 0보다 크면 항상 활성화, 현재 설정은 0.05)
 - `inst loss`는 **mapping 단계에서만 계산**  
 
 ### 4. 후처리 / 평가
